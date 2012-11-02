@@ -1,0 +1,29 @@
+{
+  "appNamespace": "Guai",
+  "currentEnvironment": "dev",
+  "outputFormats": [
+    "json", 
+    "xml", 
+    "csv", 
+    "tsv"
+  ],
+  "defaultFormat": "json",
+  "routes": [
+    "GET /login/{hash}"
+  ],
+  "database": {
+    "vendor": "mysql",
+    "dev": {
+      "host": "localhost",
+      "username": "root",
+      "password": "n4t4n13l",
+      "schema": "moobin_guai"
+    },
+    "prod": {
+      "host": "localhost",
+      "username": "root",
+      "password": "n4t4n13l",
+      "schema": "moobin_guai"
+    }
+  }
+}
