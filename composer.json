@@ -1,6 +1,7 @@
 {
-    "name": "moobin/banister",
-    "require": {
-        "php": ">=5.3.0"	
-    }
+  "name": "moobin/banister",
+  "license": "MIT",
+  "require": {
+    "php": ">=5.3.0"	
+  }
 }
