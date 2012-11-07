@@ -31,15 +31,15 @@
     "vendor": "mysql",
     "dev": {
       "host": "localhost",
-      "username": "root",
-      "password": "n4t4n13l",
-      "schema": "moobin_guai"
+      "username": "...",
+      "password": "...",
+      "schema": "..."
     },
     "prod": {
       "host": "localhost",
-      "username": "root",
-      "password": "n4t4n13l",
-      "schema": "moobin_guai"
+      "username": "...",
+      "password": "...",
+      "schema": "..."
     }
   }
 }
