@@ -135,9 +135,11 @@ class Rest
     }
 
     $uri = explode("?", $this->_requestUri);
+    $basePath = $this->_getSetting("basePath");
     foreach ($this->_getSetting("routes") as $r) {
-      $route = $r->route;
+      $route = ($basePath != -1 ? $basePath : "") . $r->route;
       $methodIsAllowed = in_array($method, $r->methods);
+      $uri[0] = preg_replace("/\\.(" . implode("|", $this->_availableFilters) . ")$/", "", $uri[0]);
       $isRoute = strcasecmp($route, $uri[0]) === 0;
       if (!$methodIsAllowed && $isRoute) {
         $this->_requestedRoute = $route;
@@ -162,8 +164,14 @@ class Rest
 
   // get mime type for response
   private function _detectResponseFormat() {
+    if (isset($this->_requestedRouteObject->mimeType)) {
+      $this->_responseMimeType = $this->_requestedRouteObject->mimeType;
+      $this->_responseFormat = "raw";
+      return;
+    }
+
     $matches = array();
-    $formats = "/\\.(" . implode("|", $this->_availableFilters) . ")$/";
+    $formats = "/\\.(" . implode("|", $this->_availableFilters) . ")/";
     preg_match($formats, $this->_requestUri, $matches);      
     if ($this->_getSetting("defaultFormat") != -1) {
       $defaultFormat = $this->_getSetting("defaultFormat");
@@ -209,7 +217,8 @@ class Rest
   // finds out which service is being requested
   private function _getApiMethodName() {
     $nameArray = array();
-    foreach (explode("/", $this->_requestedRoute) as $part) {
+    $route = str_replace($this->_getSetting("basePath"), "", $this->_requestedRoute);
+    foreach (explode("/", $route) as $part) {
       if (strpos($part, "{") === false) {
         $nameArray[] = $part;
       }
@@ -397,21 +406,24 @@ class Rest
   // binds the route to the controller
   private function _setResponseHandler() {
     $filterHandlerClass = "Banister\\" . ucwords($this->_responseFormat) . "Filter";
+
     $responseHandleMethod = $this->_getSetting("appNamespace") . "\\Rest\\" . $this->_getApiMethodName();
-    if (isset($this->_requestedRouteObject->direct) && $this->_requestedRouteObject->direct) {
+
+    $isDirect = isset($this->_requestedRouteObject->direct) && $this->_requestedRouteObject->direct;
+
+    if ($isDirect) {
       $this->_responseHandler = new $filterHandlerClass(
         $this->_getContext()
       );    
     }
 
-    if (!is_callable($responseHandleMethod) && !(isset($this->_requestedRouteObject->direct) && $this->_requestedRouteObject->direct)) {
+    if (!is_callable($responseHandleMethod) && !$isDirect) {
       $this->_abort(sprintf($this->ERR_MISSING_CONTROLLER, $this->_requestedRouteObject->route));
     } else {
-      if (isset($this->_requestedRouteObject->direct) && $this->_requestedRouteObject->direct) {
-        if (is_callable($responseHandleMethod)) {
+      if (is_callable($responseHandleMethod)) {
         $this->_responseHandler = new $filterHandlerClass(
           $responseHandleMethod($this->_getContext())
-        ); }
+        );
       }
     }
   }

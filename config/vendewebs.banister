@@ -1,0 +1,52 @@
+{
+  "appNamespace": "Vendewebs",
+  "currentEnvironment": "dev",
+  "outputFormats": [
+    "json",
+    "raw"
+  ],
+  "basePath": "/app",
+  "defaultFormat": "json",
+  "welcomeMessage": "Vendewebs en http://vendewebs.com.ar/",
+  "routes": [
+    {
+      "route": "/ip",
+      "methods": ["GET"],
+      "params": []
+    },
+    {
+      "route": "/all/scripts",
+      "methods": ["GET"],
+      "params": [],
+      "mimeType": "text/javascript"
+    },
+    {
+      "route": "/product/form",
+      "methods": ["GET"],
+      "params": [
+        {"name": "product_id", "type": "number", "required": "true"}
+      ],
+      "direct": "true",
+      "handler": {
+        "mysqlDbProc": "get_product_requirement_form"
+      }
+    }
+  ],
+  "database": {
+    "vendor": "mysql",
+    "dev": {
+      "host": "localhost",
+      "username": "root",
+      "password": "n4t4n13l",
+      "schema": "vendewebs",
+      "charset": "utf8"
+    },
+    "prod": {
+      "host": "localhost",
+      "username": "root",
+      "password": "n4t4n13l",
+      "schema": "vendewebs",
+      "charset": "utf8"
+    }
+  }
+}

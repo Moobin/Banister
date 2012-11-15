@@ -13,7 +13,8 @@ class MysqlDatabase {
     $this->_pdo = new \PDO(
       "mysql:host={$this->_settings->host};dbname={$this->_settings->schema}",
       $this->_settings->username,
-      $this->_settings->password
+      $this->_settings->password,
+      isset($this->_settings->charset) ? array(1002 => "SET NAMES {$this->_settings->charset}") : array()
     );
     $this->_pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_WARNING);
     $this->_pdo->setAttribute(\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
