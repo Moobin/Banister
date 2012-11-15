@@ -40,6 +40,7 @@ class Rest
   private $ERR_OUTPUT_FORMAT_NOT_ALLOWED = "ERR_OUTPUT_FORMAT_NOT_ALLOWED::400::Format not allowed for this application.";
   private $ERR_MISSING_PARAMETER = "ERR_MISSING_PARAMETER::400::Parameter (%s)%s is required.";
   private $ERR_MISSING_CONTROLLER = "ERR_MISSING_CONTROLLER::404::No controller function found for route %s.";
+  private $ERR_DIRECT_HANDLER_FAILED = "ERR_DIRECT_HANDLER_FAILED::500::Unable to handle route with direct handler.";
 
   private function _abort($err) {
     list($code, $status, $message) = explode("::", $err);
@@ -93,6 +94,7 @@ class Rest
       foreach ($s as $a => $b) {
         if (isset($v->$b)) {
           $v = $v->$b;
+        } else {
           // hold it, you asked something wrong, get out.
           $v = -1;
           break;
@@ -121,6 +123,17 @@ class Rest
     $routeFound = false;
     $methodIsAllowed = false;
     $method = $_SERVER["REQUEST_METHOD"];
+
+    if ($method == "OPTIONS") {
+      header("Access-Control-Allow-Origin: " . $_SERVER["HTTP_ORIGIN"]);      
+      header("Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS");
+      header("Access-Control-Allow-Headers: content-type, accept");
+      header("Access-Control-Max-Age: 10");
+      header("Content-Length: 0");
+      header("HTTP/1.1 204 No Content");
+      exit;
+    }
+
     $uri = explode("?", $this->_requestUri);
     foreach ($this->_getSetting("routes") as $r) {
       $route = $r->route;
@@ -135,6 +148,7 @@ class Rest
         $this->_requestedRoute = $route;
         $this->_requestedRouteObject = $r;
         $routeFound = true;
+
         break;
       }
     }
@@ -187,6 +201,8 @@ class Rest
 
   // echoes the mime header
   private function _setResponseFormat() {
+    header("Cache-Control: no-cache, must-revalidate"); 
+    header("Expires: Sat, 26 Jul 1997 05:00:00 GMT");
     header("Content-Type: " . $this->_responseMimeType);
   }
 
@@ -209,6 +225,13 @@ class Rest
     $params = array();
     $dbParams = array();
 
+    if ($this->_requestedMethod == "PUT" || $this->_requestedMethod == "DELETE") {
+      parse_str(file_get_contents('php://input'), $_params);
+      $GLOBALS["_{$this->_requestedMethod}"] = $_params;
+      // Add these request vars into _REQUEST, mimicing default behavior, PUT/DELETE will override existing COOKIE/GET vars
+      $_REQUEST = $_params + $_REQUEST;
+    }    
+
     foreach ($this->_requestedRouteObject->params as $i => $param) {
       if (isset($param->defaultValue)) {
         switch (strtolower($param->defaultValue)) {
@@ -220,7 +243,7 @@ class Rest
           break;
         }
       } else {
-        if (!isset($_REQUEST[$param->name]) && !$param->output) {
+        if (!isset($_REQUEST[$param->name]) && (!isset($param->output) || !$param->output)) {
           $this->_abort(sprintf($this->ERR_MISSING_PARAMETER, $param->type, $param->name));
         }
         $params[$param->name] = (isset($param->output) && $param->output) ? null : $_REQUEST[$param->name];
@@ -248,6 +271,7 @@ class Rest
       $proc = $this->_requestedRouteObject->handler->mysqlDbProc;
 
       $stmt = $db->handler()->prepare("CALL $proc(" . implode(", ", $dbParams) . ")");
+      $stmt->setFetchMode(\PDO::FETCH_CLASS, "stdClass");
 
       foreach ($this->_requestedRouteObject->params as $i => $param) {
         $format = null;
@@ -267,45 +291,104 @@ class Rest
         if (isset($param->output) && $param->output) $length = $param->length;
 
         if (isset($param->inputOutput) && $param->inputOutput) {
-          $stmt->bindParam($param->name, $params[$param->name] | \PDO::PARAM_INPUT_OUTPUT, $format, $length);  
+          $stmt->bindParam($param->name, $params[$param->name]
+           | \PDO::PARAM_INPUT_OUTPUT, $format, $length);  
         } else if (!isset($param->output) || (isset($param->output) && !$param->output)) {
           $stmt->bindParam($param->name, $params[$param->name], $format);
         }
       }
 
-      $stmt->execute();
-      $data = array();
+      if ($stmt->execute())
+      {
+        $data = array();
 
-      if ($stmt->fetchColumn() > 0) {
+        //if ($stmt->fetchColumn() > 0) {
+          while ($row = $stmt->fetch()) {
+            $data[] = $row;
+          }
+          //$data = $stmt->fetchAll();
+        //}
+
+        $stmt->closeCursor();
+        unset($stmt);
+
+        $outParams = array();
+        foreach ($dbParams as $paramName) {
+          if (substr($paramName, 0, 1) == "@") {
+            $outParams[$paramName] = null;
+          }
+        }
+
+        if (count($outParams) > 0) {
+          $stmt = $db->handler()->prepare("SELECT " . implode(", ", array_keys($outParams)));
+          $stmt->execute();
+
+          while ($row = $stmt->fetch()) {
+            foreach ($row as $column => $value) {
+              $outParams[$column] = $value;
+            }
+          }
+
+          $stmt->closeCursor();
+          unset($stmt);
+
+          $context->output = $outParams;
+        }
+
+        $context->data = $data;
+      } else {
+        $this->_abort($this->ERR_DIRECT_HANDLER_FAILED . "::" . json_encode($db->handler()->errorInfo()));
+      }
+    }
+
+    // if the route has a mysqlfunc handler, let the base handle it!
+    if (isset($this->_requestedRouteObject->handler->mysqlDbFunc)) {
+      $func = $this->_requestedRouteObject->handler->mysqlDbFunc;
+      $field = $this->_requestedRouteObject->handler->resultName;
+
+      $stmt = $db->handler()->prepare("SELECT $func(" . implode(", ", $dbParams) . ") AS $field");
+      $stmt->setFetchMode(\PDO::FETCH_CLASS, "stdClass");
+
+      foreach ($this->_requestedRouteObject->params as $i => $param) {
+        $format = null;
+        $length = null;
+        switch (strtolower($param->type)) {
+          case "number":
+            $format = \PDO::PARAM_INT;
+          break;
+          case "bool":
+            $format = \PDO::PARAM_BOOL;
+          break;
+          default:
+            $format = \PDO::PARAM_STR;
+          break;
+        }
+
+        if (isset($param->output) && $param->output) $length = $param->length;
+
+        if (isset($param->inputOutput) && $param->inputOutput) {
+          $stmt->bindParam($param->name, $params[$param->name]
+           | \PDO::PARAM_INPUT_OUTPUT, $format, $length);  
+        } else if (!isset($param->output) || (isset($param->output) && !$param->output)) {
+          $stmt->bindParam($param->name, $params[$param->name], $format);
+        }
+      }
+
+      if ($stmt->execute()) {
+        $data = array();
+
         while ($row = $stmt->fetch()) {
           $data[] = $row;
         }
+
+        $stmt->closeCursor();
+        unset($stmt);
+
+        $context->data = $data;
+      } else {
+        $this->_abort($this->ERR_DIRECT_HANDLER_FAILED . "::" . json_encode($db->handler()->errorInfo()));
       }
 
-      $stmt->closeCursor();
-      unset($stmt);
-
-      $outParams = array();
-      foreach ($dbParams as $paramName) {
-        if (substr($paramName, 0, 1) == "@") {
-          $outParams[$paramName] = null;
-        }
-      }
-
-      $stmt = $db->handler()->prepare("SELECT " . implode(", ", array_keys($outParams)));
-      $stmt->execute();
-
-      while ($row = $stmt->fetch()) {
-        foreach ($row as $column => $value) {
-          $outParams[$column] = $value;
-        }
-      }
-
-      $stmt->closeCursor();
-      unset($stmt);
-
-      $context->data = $data;
-      $context->output = array_unique($outParams);
     }
 
     return $context;
@@ -319,14 +402,17 @@ class Rest
       $this->_responseHandler = new $filterHandlerClass(
         $this->_getContext()
       );    
+    }
+
+    if (!is_callable($responseHandleMethod) && !(isset($this->_requestedRouteObject->direct) && $this->_requestedRouteObject->direct)) {
+      $this->_abort(sprintf($this->ERR_MISSING_CONTROLLER, $this->_requestedRouteObject->route));
     } else {
-      if (!is_callable($responseHandleMethod))
-      {
-        $this->_abort(sprintf($this->ERR_MISSING_CONTROLLER, $this->_requestedRouteObject->route));
+      if (isset($this->_requestedRouteObject->direct) && $this->_requestedRouteObject->direct) {
+        if (is_callable($responseHandleMethod)) {
+        $this->_responseHandler = new $filterHandlerClass(
+          $responseHandleMethod($this->_getContext())
+        ); }
       }
-      $this->_responseHandler = new $filterHandlerClass(
-        $responseHandleMethod($this->_getContext())
-      );
     }
   }
 
